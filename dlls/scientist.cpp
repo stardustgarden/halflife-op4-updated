@@ -108,6 +108,8 @@ public:
 
 	void TalkInit();
 
+	char* GetScientistModel() const;
+
 	void Killed(entvars_t* pevAttacker, int iGib) override;
 
 	bool Save(CSave& save) override;
@@ -132,6 +134,17 @@ TYPEDESCRIPTION CScientist::m_SaveData[] =
 };
 
 IMPLEMENT_SAVERESTORE(CScientist, CTalkMonster);
+
+char* CScientist::GetScientistModel() const
+{
+	char* pszOverride = (char*)CVAR_GET_STRING("_sv_override_scientist_mdl");
+	if (pszOverride && strlen(pszOverride) > 5) // at least requires ".mdl"
+	{
+		return pszOverride;
+	}
+
+	return "models/scientist.mdl";
+}
 
 //=========================================================
 // AI Schedules Specific to this monster
@@ -371,13 +384,13 @@ Schedule_t slScientistStartle[] =
 };
 
 
-
+// Marphy Fact Files Fix - Restore fear display animation
 Task_t tlFear[] =
 	{
 		{TASK_STOP_MOVING, (float)0},
 		{TASK_FACE_ENEMY, (float)0},
 		{TASK_SAY_FEAR, (float)0},
-		//	{ TASK_PLAY_SEQUENCE,			(float)ACT_FEAR_DISPLAY		},
+		{TASK_PLAY_SEQUENCE_FACE_ENEMY, (float)ACT_FEAR_DISPLAY},
 };
 
 Schedule_t slFear[] =
@@ -419,12 +432,13 @@ void CScientist::DeclineFollowing()
 
 void CScientist::Scream()
 {
-	if (FOkToSpeak())
-	{
-		Talk(10);
-		m_hTalkTarget = m_hEnemy;
-		PlaySentence("SC_SCREAM", RANDOM_FLOAT(3, 6), VOL_NORM, ATTN_NORM);
-	}
+	// Marphy Fact Files Fix - This speech check always fails during combat, so removing
+	//if ( FOkToSpeak() )
+	//{
+	Talk(10);
+	m_hTalkTarget = m_hEnemy;
+	PlaySentence("SC_SCREAM", RANDOM_FLOAT(3, 6), VOL_NORM, ATTN_NORM);
+	//}
 }
 
 
@@ -461,7 +475,9 @@ void CScientist::StartTask(Task_t* pTask)
 		break;
 
 	case TASK_SAY_FEAR:
-		if (FOkToSpeak())
+		// Marphy Fact FIles Fix - This speech check always fails during combat, so removing
+		//if ( FOkToSpeak() )
+		if (m_hEnemy)
 		{
 			Talk(2);
 			m_hTalkTarget = m_hEnemy;
@@ -507,14 +523,18 @@ void CScientist::RunTask(Task_t* pTask)
 	case TASK_RUN_PATH_SCARED:
 		if (MovementIsComplete())
 			TaskComplete();
-		if (RANDOM_LONG(0, 31) < 8)
+
+		// Marphy Fact Files Fix - Reducing scream (which didn't work before) chance significantly
+		//if ( RANDOM_LONG(0,31) < 8 )
+		if (RANDOM_LONG(0, 63) < 1)
 			Scream();
 		break;
 
 	case TASK_MOVE_TO_TARGET_RANGE_SCARED:
 	{
-		if (RANDOM_LONG(0, 63) < 8)
-			Scream();
+		// Marphy Fact Files Fix - Removing redundant scream
+		//if ( RANDOM_LONG(0,63)< 8 )
+		//Scream();
 
 		if (m_hEnemy == NULL)
 		{
@@ -641,9 +661,14 @@ void CScientist::HandleAnimEvent(MonsterEvent_t* pEvent)
 //=========================================================
 void CScientist::Spawn()
 {
+	if (pev->body == -1)
+	{														 // -1 chooses a random head
+		pev->body = RANDOM_LONG(0, NUM_SCIENTIST_HEADS - 1); // pick a head, any head
+	}
+
 	Precache();
 
-	SET_MODEL(ENT(pev), "models/scientist.mdl");
+	SET_MODEL(ENT(pev), GetScientistModel());
 	UTIL_SetSize(pev, VEC_HUMAN_HULL_MIN, VEC_HUMAN_HULL_MAX);
 
 	pev->solid = SOLID_SLIDEBOX;
@@ -661,11 +686,6 @@ void CScientist::Spawn()
 	// White hands
 	pev->skin = 0;
 
-	if (pev->body == -1)
-	{														 // -1 chooses a random head
-		pev->body = RANDOM_LONG(0, NUM_SCIENTIST_HEADS - 1); // pick a head, any head
-	}
-
 	// Luther is black, make his hands black
 	if (pev->body == HEAD_LUTHER)
 		pev->skin = 1;
@@ -679,7 +699,7 @@ void CScientist::Spawn()
 //=========================================================
 void CScientist::Precache()
 {
-	PRECACHE_MODEL("models/scientist.mdl");
+	PRECACHE_MODEL(GetScientistModel());
 	PRECACHE_SOUND("scientist/sci_pain1.wav");
 	PRECACHE_SOUND("scientist/sci_pain2.wav");
 	PRECACHE_SOUND("scientist/sci_pain3.wav");
@@ -730,7 +750,7 @@ void CScientist::TalkInit()
 	m_szGrp[TLK_MORTAL] = "SC_MORTAL";
 
 	// get voice for head
-	switch (pev->body % 3)
+	switch (pev->body % NUM_SCIENTIST_HEADS)
 	{
 	default:
 	case HEAD_GLASSES:
@@ -767,6 +787,7 @@ bool CScientist::TakeDamage(entvars_t* pevInflictor, entvars_t* pevAttacker, flo
 // of sounds this monster regards. In the base class implementation,
 // monsters care about all sounds, but no scents.
 //=========================================================
+// Marphy Fact Files Fix - Restore scientist's sense of smell
 int CScientist::ISoundMask()
 {
 	return bits_SOUND_WORLD |
@@ -919,6 +940,9 @@ Schedule_t* CScientist::GetSchedule()
 			{
 				m_hEnemy = NULL;
 				pEnemy = NULL;
+
+				// Marphy Fact Files Fix - Fix scientists not disregarding enemy after hiding
+				m_fearTime = gpGlobals->time;
 			}
 		}
 
@@ -994,11 +1018,37 @@ Schedule_t* CScientist::GetSchedule()
 	case MONSTERSTATE_COMBAT:
 		if (HasConditions(bits_COND_NEW_ENEMY))
 			return slFear; // Point and scream!
+
 		if (HasConditions(bits_COND_SEE_ENEMY))
+		{
+			// Marphy Fact Files Fix - Fix scientists not disregarding enemy after hiding
+			m_fearTime = gpGlobals->time;
 			return slScientistCover; // Take Cover
+		}
 
 		if (HasConditions(bits_COND_HEAR_SOUND))
 			return slTakeCoverFromBestSound; // Cower and panic from the scary sound!
+
+		// Marphy Fact Files Fix - Fix scientists not disregarding enemy after hiding
+		if (pEnemy)
+		{
+			if (HasConditions(bits_COND_SEE_ENEMY))
+				m_fearTime = gpGlobals->time;
+			else if (DisregardEnemy(pEnemy)) // After 15 seconds of being hidden, return to alert
+			{
+				m_hEnemy = NULL;
+				pEnemy = NULL;
+
+				m_fearTime = gpGlobals->time;
+
+				if (IsFollowing())
+				{
+					return slScientistStartle;
+				}
+
+				return slScientistHide; // Hide after disregard
+			}
+		}
 
 		return slScientistCover; // Run & Cower
 		break;
@@ -1045,6 +1095,9 @@ MONSTERSTATE CScientist::GetIdealState()
 				// Strip enemy when going to alert
 				m_IdealMonsterState = MONSTERSTATE_ALERT;
 				m_hEnemy = NULL;
+
+				// Marphy Fact Files Fix - Fix scientists not disregarding enemy after hiding
+				m_fearTime = gpGlobals->time;
 				return m_IdealMonsterState;
 			}
 			// Follow if only scared a little
@@ -1109,11 +1162,25 @@ public:
 	void Spawn() override;
 	int Classify() override { return CLASS_HUMAN_PASSIVE; }
 
+	// passed into Precache which is non-const
+	char* GetScientistModel() const;
+
 	bool KeyValue(KeyValueData* pkvd) override;
 	int m_iPose; // which sequence to display
 	static const char* m_szPoses[7];
 };
 const char* CDeadScientist::m_szPoses[] = {"lying_on_back", "lying_on_stomach", "dead_sitting", "dead_hang", "dead_table1", "dead_table2", "dead_table3"};
+
+char* CDeadScientist::GetScientistModel() const
+{
+	char* pszOverride = (char*)CVAR_GET_STRING("_sv_override_scientist_mdl");
+	if (pszOverride && strlen(pszOverride) > 5) // at least requires ".mdl"
+	{
+		return pszOverride;
+	}
+
+	return "models/scientist.mdl";
+}
 
 bool CDeadScientist::KeyValue(KeyValueData* pkvd)
 {
@@ -1132,8 +1199,8 @@ LINK_ENTITY_TO_CLASS(monster_scientist_dead, CDeadScientist);
 //
 void CDeadScientist::Spawn()
 {
-	PRECACHE_MODEL("models/scientist.mdl");
-	SET_MODEL(ENT(pev), "models/scientist.mdl");
+	PRECACHE_MODEL(GetScientistModel());
+	SET_MODEL(ENT(pev), GetScientistModel());
 
 	pev->effects = 0;
 	pev->sequence = 0;
@@ -1214,8 +1281,8 @@ typedef enum
 //
 void CSittingScientist::Spawn()
 {
-	PRECACHE_MODEL("models/scientist.mdl");
-	SET_MODEL(ENT(pev), "models/scientist.mdl");
+	PRECACHE_MODEL(GetScientistModel());
+	SET_MODEL(ENT(pev), GetScientistModel());
 	Precache();
 	InitBoneControllers();
 

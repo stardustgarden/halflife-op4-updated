@@ -24,6 +24,11 @@
 #include "gamerules.h"
 #include "UserMessages.h"
 
+#ifdef CLIENT_DLL
+#include "hud.h"
+#include "com_weapons.h"
+#endif
+
 #define EGON_SWITCH_NARROW_TIME 0.75 // Time it takes to switch fire modes
 #define EGON_SWITCH_WIDE_TIME 1.5
 
@@ -410,7 +415,9 @@ void CEgon::CreateEffect()
 	m_pSprite->pev->scale = 1.0;
 	m_pSprite->SetTransparency(kRenderGlow, 255, 255, 255, 255, kRenderFxNoDissipation);
 	m_pSprite->pev->spawnflags |= SF_SPRITE_TEMPORARY;
-	m_pSprite->pev->flags |= FL_SKIPLOCALHOST;
+	// Josh: This sprite is not predicted on the client, so was missing
+	// for many years after it got broken in an update.
+	// m_pSprite->pev->flags |= FL_SKIPLOCALHOST;
 	m_pSprite->pev->owner = m_pPlayer->edict();
 
 	if (m_fireMode == FIRE_WIDE)
@@ -505,6 +512,7 @@ void CEgon::EndAttack()
 		static_cast<int>(bMakeNoise), 0, 0, 0);
 
 	m_flTimeWeaponIdle = UTIL_WeaponTimeBase() + 2.0;
+
 	m_flNextPrimaryAttack = m_flNextSecondaryAttack = UTIL_WeaponTimeBase() + 0.5;
 
 	m_fireState = FIRE_OFF;

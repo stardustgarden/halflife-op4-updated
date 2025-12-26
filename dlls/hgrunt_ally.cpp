@@ -878,7 +878,7 @@ void CHGruntAlly::IdleSound()
 //=========================================================
 void CHGruntAlly::CheckAmmo()
 {
-	if (m_cAmmoLoaded <= 0)
+	if (pev->weapons != 0 && m_cAmmoLoaded <= 0)
 	{
 		SetConditions(bits_COND_NO_AMMO_LOADED);
 	}
@@ -1503,6 +1503,7 @@ Schedule_t slGruntAllyCombatFail[] =
 Task_t tlGruntAllyVictoryDance[] =
 	{
 		{TASK_STOP_MOVING, (float)0},
+		{TASK_SET_ACTIVITY, (float)ACT_IDLE},
 		{TASK_FACE_ENEMY, (float)0},
 		{TASK_WAIT, (float)1.5},
 		{TASK_GET_PATH_TO_ENEMY_CORPSE, (float)0},
@@ -2919,6 +2920,11 @@ void CHGruntAlly::Killed(entvars_t* pevAttacker, int iGib)
 class CHGruntAllyRepel : public CBaseMonster
 {
 public:
+	static TYPEDESCRIPTION m_SaveData[];
+
+	bool Save(CSave& save) override;
+	bool Restore(CRestore& restore) override;
+
 	bool KeyValue(KeyValueData* pkvd) override;
 
 	void Spawn() override;
@@ -2926,13 +2932,21 @@ public:
 	void EXPORT RepelUse(CBaseEntity* pActivator, CBaseEntity* pCaller, USE_TYPE useType, float value);
 	int m_iSpriteTexture; // Don't save, precache
 
-	//TODO: needs save/restore (not in op4)
 	int m_iGruntHead;
 	int m_iszUse;
 	int m_iszUnUse;
 };
 
 LINK_ENTITY_TO_CLASS(monster_grunt_ally_repel, CHGruntAllyRepel);
+
+TYPEDESCRIPTION CHGruntAllyRepel::m_SaveData[] =
+	{
+		DEFINE_FIELD(CHGruntAllyRepel, m_iGruntHead, FIELD_INTEGER),
+		DEFINE_FIELD(CHGruntAllyRepel, m_iszUse, FIELD_STRING),
+		DEFINE_FIELD(CHGruntAllyRepel, m_iszUnUse, FIELD_STRING),
+};
+
+IMPLEMENT_SAVERESTORE(CHGruntAllyRepel, CBaseMonster);
 
 bool CHGruntAllyRepel::KeyValue(KeyValueData* pkvd)
 {

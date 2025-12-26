@@ -226,7 +226,7 @@ void COFChargedBolt::ArmBeam(int side)
 	float flDist = 1.0;
 
 	if (m_iBeams >= VOLTIGORE_BEAM_COUNT)
-		return;
+		m_iBeams = 0;
 
 	UTIL_MakeAimVectors(pev->angles);
 	Vector vecSrc = pev->origin + gpGlobals->v_up * 36 + gpGlobals->v_right * side * 16 + gpGlobals->v_forward * 32;
@@ -247,8 +247,12 @@ void COFChargedBolt::ArmBeam(int side)
 	if (flDist == 1.0)
 		return;
 
-	CBeam* pBeam = CBeam::BeamCreate("sprites/lgtning.spr", 30);
-	m_pBeam[m_iBeams] = pBeam;
+	auto pBeam = m_pBeam[m_iBeams].Entity<CBeam>();
+
+	if (!pBeam)
+	{
+		m_pBeam[m_iBeams] = pBeam = CBeam::BeamCreate("sprites/lgtning.spr", 30);
+	}
 
 	if (!pBeam)
 		return;
@@ -1297,7 +1301,7 @@ void COFVoltigore::DeathGibThink()
 	{
 		for (auto i = 0; i < 2; ++i)
 		{
-			const auto side = static_cast<int>((i % 2) == 0);
+			const auto side = i == 0 ? -1 : 1;
 
 			UTIL_MakeAimVectors(pev->angles);
 
@@ -1333,7 +1337,7 @@ void COFVoltigore::DeathGibThink()
 
 			auto pHit = Instance(tr.pHit);
 
-			if (pHit)
+			if (pHit && pHit->pev->takedamage != DAMAGE_NO)
 			{
 				pBeam->PointEntInit(pev->origin + Vector(0, 0, 32), pHit->entindex());
 

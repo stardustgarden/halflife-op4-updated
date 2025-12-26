@@ -238,7 +238,7 @@ static void InitBodyQue()
 //
 void CopyToBodyQue(entvars_t* pev)
 {
-	if ((pev->effects & EF_NODRAW) != 0)
+	if ((pev->effects & EF_NODRAW) != 0 || pev->modelindex == 0)
 		return;
 
 	entvars_t* pevHead = VARS(g_pBodyQueueHead);
@@ -480,6 +480,27 @@ void ResetGlobalState()
 
 LINK_ENTITY_TO_CLASS(worldspawn, CWorld);
 
+CWorld::CWorld()
+{
+	if (World)
+	{
+		ALERT(at_error, "Do not create multiple instances of worldspawn\n");
+		return;
+	}
+
+	World = this;
+}
+
+CWorld::~CWorld()
+{
+	if (World != this)
+	{
+		return;
+	}
+
+	World = nullptr;
+}
+
 void CWorld::Spawn()
 {
 	g_fGameOver = false;
@@ -494,6 +515,13 @@ void CWorld::Spawn()
 
 void CWorld::Precache()
 {
+	// Flag this entity for removal if it's not the actual world entity.
+	if (World != this)
+	{
+		UTIL_Remove(this);
+		return;
+	}
+
 	g_pLastSpawn = NULL;
 
 #if 1

@@ -65,16 +65,6 @@ extern DLL_GLOBAL int g_iSkillLevel;
 #define HGRUNT_HANDGRENADE (1 << 1)
 #define HGRUNT_SHOTGUN (1 << 3)
 
-#define HEAD_GROUP 1
-#define HEAD_GRUNT 0
-#define HEAD_COMMANDER 1
-#define HEAD_SHOTGUN 2
-#define HEAD_M203 3
-#define GUN_GROUP 2
-#define GUN_MP5 0
-#define GUN_SHOTGUN 1
-#define GUN_NONE 2
-
 namespace STrooperBodyGroup
 {
 enum STrooperBodyGroup
@@ -923,6 +913,7 @@ void CShockTrooper::HandleAnimEvent(MonsterEvent_t* pEvent)
 			JustSpoke();
 		}
 	}
+	break;
 
 	default:
 		CSquadMonster::HandleAnimEvent(pEvent);
@@ -944,7 +935,7 @@ void CShockTrooper::Spawn()
 	pev->movetype = MOVETYPE_STEP;
 	m_bloodColor = BLOOD_COLOR_GREEN;
 	pev->effects = 0;
-	pev->health = gSkillData.shocktrooperHealth;
+	pev->health = 2.5f * gSkillData.shocktrooperHealth;
 	m_flFieldOfView = 0.2; // indicates the width of this monster's forward view cone ( as a dotproduct result )
 	m_MonsterState = MONSTERSTATE_NONE;
 	m_flNextGrenadeCheck = gpGlobals->time + 1;
@@ -958,7 +949,7 @@ void CShockTrooper::Spawn()
 
 	m_HackedGunPos = Vector(0, 0, 55);
 
-	SetBodygroup(GUN_GROUP, GUN_SHOTGUN);
+	SetBodygroup(STrooperBodyGroup::Weapons, STrooperWeapon::Roach);
 
 	pev->weapons = HGRUNT_9MMAR | HGRUNT_HANDGRENADE;
 
@@ -1184,6 +1175,7 @@ Schedule_t slShockTrooperCombatFail[] =
 Task_t tlShockTrooperVictoryDance[] =
 	{
 		{TASK_STOP_MOVING, (float)0},
+		{TASK_SET_ACTIVITY, (float)ACT_IDLE},
 		{TASK_FACE_ENEMY, (float)0},
 		{TASK_WAIT, (float)1.5},
 		{TASK_GET_PATH_TO_ENEMY_CORPSE, (float)0},

@@ -22,6 +22,7 @@
 #include "usercmd.h"
 #include "pm_defs.h"
 #include "pm_shared.h"
+#include "pm_materials.h"
 #include "pm_movevars.h"
 #include "pm_debug.h"
 #include <stdio.h>	// NULL
@@ -82,21 +83,6 @@ typedef struct hull_s
 #define STUCK_MOVEDOWN -1
 #define STOP_EPSILON 0.1
 
-#define CTEXTURESMAX 512	// max number of textures loaded
-#define CBTEXTURENAMEMAX 13 // only load first n chars of name
-
-#define CHAR_TEX_CONCRETE 'C' // texture types
-#define CHAR_TEX_METAL 'M'
-#define CHAR_TEX_DIRT 'D'
-#define CHAR_TEX_VENT 'V'
-#define CHAR_TEX_GRATE 'G'
-#define CHAR_TEX_TILE 'T'
-#define CHAR_TEX_SLOSH 'S'
-#define CHAR_TEX_WOOD 'W'
-#define CHAR_TEX_COMPUTER 'P'
-#define CHAR_TEX_GLASS 'Y'
-#define CHAR_TEX_FLESH 'F'
-
 #define STEP_CONCRETE 0 // default step sound
 #define STEP_METAL 1	// metal floor
 #define STEP_DIRT 2		// dirt, sand, rock
@@ -106,6 +92,7 @@ typedef struct hull_s
 #define STEP_SLOSH 6	// shallow liquid puddle
 #define STEP_WADE 7		// wading in liquid
 #define STEP_LADDER 8	// climbing ladder
+#define STEP_SNOW 9		// snow
 
 #define PLAYER_FATAL_FALL_SPEED 1024															  // approx 60 feet
 #define PLAYER_MAX_SAFE_FALL_SPEED 580															  // approx 20 feet
@@ -144,6 +131,20 @@ static char grgszTextureName[CTEXTURESMAX][CBTEXTURENAMEMAX];
 static char grgchTextureType[CTEXTURESMAX];
 
 bool g_onladder = false;
+
+static void PM_InitTrace(trace_t* trace, const Vector& end)
+{
+	memset(trace, 0, sizeof(*trace));
+	VectorCopy(end, trace->endpos);
+	trace->allsolid = 1;
+	trace->fraction = 1.0f;
+}
+
+static void PM_TraceModel(physent_t* pEnt, const Vector& start, const Vector& end, trace_t* trace)
+{
+	PM_InitTrace(trace, end);
+	pmove->PM_TraceModel(pEnt, start, end, trace);
+}
 
 void PM_SwapTextures(int i, int j)
 {
@@ -250,7 +251,7 @@ void PM_InitTextureTypes()
 	bTextureTypeInit = true;
 }
 
-char PM_FindTextureType(char* name)
+char PM_FindTextureType(const char* name)
 {
 	int left, right, pivot;
 	int val;
@@ -501,6 +502,25 @@ void PM_PlayStepSound(int step, float fvol)
 			break;
 		}
 		break;
+	case STEP_SNOW:
+		switch (irand)
+		{
+		// right foot
+		case 0:
+			pmove->PM_PlaySound(CHAN_BODY, "player/pl_snow1.wav", fvol, ATTN_NORM, 0, PITCH_NORM);
+			break;
+		case 1:
+			pmove->PM_PlaySound(CHAN_BODY, "player/pl_snow3.wav", fvol, ATTN_NORM, 0, PITCH_NORM);
+			break;
+		// left foot
+		case 2:
+			pmove->PM_PlaySound(CHAN_BODY, "player/pl_snow2.wav", fvol, ATTN_NORM, 0, PITCH_NORM);
+			break;
+		case 3:
+			pmove->PM_PlaySound(CHAN_BODY, "player/pl_snow4.wav", fvol, ATTN_NORM, 0, PITCH_NORM);
+			break;
+		}
+		break;
 	}
 }
 
@@ -523,6 +543,8 @@ int PM_MapTextureTypeStepType(char chTextureType)
 		return STEP_TILE;
 	case CHAR_TEX_SLOSH:
 		return STEP_SLOSH;
+	case CHAR_TEX_SNOW:
+		return STEP_SNOW;
 	}
 }
 
@@ -970,8 +992,10 @@ int PM_FlyMove()
 
 		// modify original_velocity so it parallels all of the clip planes
 		//
-		if (pmove->movetype == MOVETYPE_WALK &&
-			((pmove->onground == -1) || (pmove->friction != 1))) // relfect player velocity
+		// relfect player velocity
+		// Only give this a try for first impact plane because you can get yourself stuck in an acute corner by jumping in place
+		//  and pressing forward and nobody was really using this bounce/reflection feature anyway...
+		if (numplanes == 1 && pmove->movetype == MOVETYPE_WALK && ((pmove->onground == -1) || (pmove->friction != 1)))
 		{
 			for (i = 0; i < numplanes; i++)
 			{
@@ -1695,14 +1719,44 @@ allow for the cut precision of the net coordinates
 */
 #define PM_CHECKSTUCK_MINTIME 0.05 // Don't check again too quickly.
 
+bool PM_TryToUnstuck(Vector base)
+{
+	float x, y, z;
+	float xystep = 8.0;
+	float zstep = 18.0;
+	float xyminmax = xystep;
+	float zminmax = 4 * zstep;
+	Vector test;
+
+	for (z = 0; z <= zminmax; z += zstep)
+	{
+		for (x = -xyminmax; x <= xyminmax; x += xystep)
+		{
+			for (y = -xyminmax; y <= xyminmax; y += xystep)
+			{
+				test = base;
+				test[0] += x;
+				test[1] += y;
+				test[2] += z;
+
+				if (pmove->PM_TestPlayerPosition(test, NULL) == -1)
+				{
+					VectorCopy(test, pmove->origin);
+					return false;
+				}
+			}
+		}
+	}
+
+	return true;
+}
+
 bool PM_CheckStuck()
 {
 	Vector base;
 	Vector offset;
 	Vector test;
 	int hitent;
-	int idx;
-	float fTime;
 	int i;
 	pmtrace_t traceresult;
 
@@ -1719,9 +1773,9 @@ bool PM_CheckStuck()
 	VectorCopy(pmove->origin, base);
 
 	//
-	// Deal with precision error in network.
+	// Deal with precision error in network and cases where the player can get stuck on level transitions in singleplayer.
 	//
-	if (0 == pmove->server)
+	if (0 == pmove->server || 0 == pmove->multiplayer)
 	{
 		// World or BSP model
 		if ((hitent == 0) ||
@@ -1746,21 +1800,21 @@ bool PM_CheckStuck()
 		}
 	}
 
-	// Only an issue on the client.
-
-	if (0 != pmove->server)
-		idx = 0;
-	else
-		idx = 1;
-
-	fTime = pmove->Sys_FloatTime();
-	// Too soon?
-	if (rgStuckCheckTime[pmove->player_index][idx] >=
-		(fTime - PM_CHECKSTUCK_MINTIME))
+	// Always check if we've just changed levels.
+	if (!(pmove->server != 0 && g_CheckForPlayerStuck))
 	{
-		return true;
+		// TODO: not really necessary to have separate arrays for client and server since the code is separate anyway.
+		const int idx = 0 != pmove->server ? 0 : 1;
+
+		const float fTime = pmove->Sys_FloatTime();
+		// Too soon?
+		if (rgStuckCheckTime[pmove->player_index][idx] >=
+			(fTime - PM_CHECKSTUCK_MINTIME))
+		{
+			return true;
+		}
+		rgStuckCheckTime[pmove->player_index][idx] = fTime;
 	}
-	rgStuckCheckTime[pmove->player_index][idx] = fTime;
 
 	pmove->PM_StuckTouch(hitent, &traceresult);
 
@@ -1779,34 +1833,29 @@ bool PM_CheckStuck()
 		return false;
 	}
 
+	// Try to unstuck the player after a level change.
+	// This only works in singleplayer. In multiplayer there it's too unreliable to try, so only the first player gets unstuck.
+	if (pmove->server != 0 && g_CheckForPlayerStuck)
+	{
+		g_CheckForPlayerStuck = false;
+
+		// Are we stuck inside the world?
+		if (hitent == 0)
+		{
+			if (!PM_TryToUnstuck(base))
+			{
+				return false;
+			}
+		}
+	}
+
 	// If player is flailing while stuck in another player ( should never happen ), then see
 	//  if we can't "unstick" them forceably.
 	if ((pmove->cmd.buttons & (IN_JUMP | IN_DUCK | IN_ATTACK)) != 0 && (pmove->physents[hitent].player != 0))
 	{
-		float x, y, z;
-		float xystep = 8.0;
-		float zstep = 18.0;
-		float xyminmax = xystep;
-		float zminmax = 4 * zstep;
-
-		for (z = 0; z <= zminmax; z += zstep)
+		if (!PM_TryToUnstuck(base))
 		{
-			for (x = -xyminmax; x <= xyminmax; x += xystep)
-			{
-				for (y = -xyminmax; y <= xyminmax; y += xystep)
-				{
-					VectorCopy(base, test);
-					test[0] += x;
-					test[1] += y;
-					test[2] += z;
-
-					if (pmove->PM_TestPlayerPosition(test, NULL) == -1)
-					{
-						VectorCopy(test, pmove->origin);
-						return false;
-					}
-				}
-			}
+			return false;
 		}
 	}
 
@@ -2148,7 +2197,7 @@ void PM_LadderMove(physent_t* pLadder)
 	const bool onFloor = pmove->PM_PointContents(floor, NULL) == CONTENTS_SOLID;
 
 	pmove->gravity = 0;
-	pmove->PM_TraceModel(pLadder, pmove->origin, ladderCenter, &trace);
+	PM_TraceModel(pLadder, pmove->origin, ladderCenter, &trace);
 	if (trace.fraction != 1.0)
 	{
 		float forward = 0, right = 0;
@@ -2499,6 +2548,13 @@ void PM_NoClip()
 //-----------------------------------------------------------------------------
 void PM_PreventMegaBunnyJumping()
 {
+	const bool allowBunnyHopping = atoi(pmove->PM_Info_ValueForKey(pmove->physinfo, "bj")) == 1;
+
+	if (allowBunnyHopping)
+	{
+		return;
+	}
+
 	// Current player speed
 	float spd;
 	// If we have to crop, apply this cropping fraction to velocity
@@ -2612,13 +2668,17 @@ void PM_Jump()
 
 	PM_PreventMegaBunnyJumping();
 
-	if (tfc)
+	// Don't play jump sounds while frozen.
+	if ((pmove->flags & FL_FROZEN) == 0)
 	{
-		pmove->PM_PlaySound(CHAN_BODY, "player/plyrjmp8.wav", 0.5, ATTN_NORM, 0, PITCH_NORM);
-	}
-	else
-	{
-		PM_PlayStepSound(PM_MapTextureTypeStepType(pmove->chtexturetype), 1.0);
+		if (tfc)
+		{
+			pmove->PM_PlaySound(CHAN_BODY, "player/plyrjmp8.wav", 0.5, ATTN_NORM, 0, PITCH_NORM);
+		}
+		else
+		{
+			PM_PlayStepSound(PM_MapTextureTypeStepType(pmove->chtexturetype), 1.0);
+		}
 	}
 
 	// See if user can super long jump?
@@ -2882,7 +2942,7 @@ void PM_DropPunchAngle(Vector& punchangle)
 
 	len = VectorNormalize(punchangle);
 	len -= (10.0 + len * 0.5) * pmove->frametime;
-	len = V_max(len, 0.0);
+	len = V_max(len, 0.0f);
 	VectorScale(punchangle, len, punchangle);
 }
 
@@ -2907,6 +2967,15 @@ void PM_CheckParamters()
 	if (maxspeed != 0.0)
 	{
 		pmove->maxspeed = V_min(maxspeed, pmove->maxspeed);
+	}
+
+	// Slow down, I'm pulling it! (a box maybe) but only when I'm standing on ground
+	//
+	// JoshA: Moved this to CheckParamters rather than working on the velocity,
+	// as otherwise it affects every integration step incorrectly.
+	if ((pmove->onground != -1) && (pmove->cmd.buttons & IN_USE))
+	{
+		pmove->maxspeed *= 1.0f / 3.0f;
 	}
 
 	if ((spd != 0.0) &&
@@ -3033,7 +3102,13 @@ void PM_PlayerMove(qboolean server)
 	{
 		if (PM_CheckStuck())
 		{
-			return; // Can't move, we're stuck
+			// Let the user try to duck to get unstuck
+			PM_Duck();
+
+			if (PM_CheckStuck())
+			{
+				return; // Can't move, we're stuck
+			}
 		}
 	}
 
@@ -3078,12 +3153,6 @@ void PM_PlayerMove(qboolean server)
 			//  it will be set immediately again next frame if necessary
 			pmove->movetype = MOVETYPE_WALK;
 		}
-	}
-
-	// Slow down, I'm pulling it! (a box maybe) but only when I'm standing on ground
-	if ((pmove->onground != -1) && (pmove->cmd.buttons & IN_USE) != 0)
-	{
-		VectorScale(pmove->velocity, 0.3, pmove->velocity);
 	}
 
 	// Handle movement
@@ -3386,8 +3455,8 @@ void PM_Move(struct playermove_s* ppmove, qboolean server)
 		pmove->flags &= ~FL_ONGROUND;
 	}
 
-	// In single player, reset friction after each movement to FrictionModifier Triggers work still.
-	if (0 == pmove->multiplayer && (pmove->movetype == MOVETYPE_WALK))
+	// Reset friction after each movement so FrictionModifier Triggers work still.
+	if (pmove->movetype == MOVETYPE_WALK)
 	{
 		pmove->friction = 1.0f;
 	}

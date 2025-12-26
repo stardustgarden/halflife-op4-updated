@@ -84,11 +84,12 @@ static CHLVoiceStatusHelper g_VoiceStatusHelper;
 
 extern client_sprite_t* GetSpriteList(client_sprite_t* pList, const char* psz, int iRes, int iCount);
 
-extern cvar_t* sensitivity;
+extern float IN_GetMouseSensitivity();
 cvar_t* cl_lw = NULL;
 cvar_t* cl_rollangle = nullptr;
 cvar_t* cl_rollspeed = nullptr;
 cvar_t* cl_bobtilt = nullptr;
+cvar_t* r_decals = nullptr;
 
 void ShutdownInput();
 
@@ -384,7 +385,7 @@ void CHud::Init()
 	m_iFOV = 0;
 	setNightVisionState(false);
 
-	CVAR_CREATE("zoom_sensitivity_ratio", "1.2", 0);
+	CVAR_CREATE("zoom_sensitivity_ratio", "1.2", FCVAR_ARCHIVE);
 	CVAR_CREATE("cl_autowepswitch", "1", FCVAR_ARCHIVE | FCVAR_USERINFO);
 	default_fov = CVAR_CREATE("default_fov", "90", FCVAR_ARCHIVE);
 	m_pCvarStealMouse = CVAR_CREATE("hud_capturemouse", "1", FCVAR_ARCHIVE);
@@ -393,6 +394,7 @@ void CHud::Init()
 	cl_rollangle = CVAR_CREATE("cl_rollangle", "2.0", FCVAR_ARCHIVE);
 	cl_rollspeed = CVAR_CREATE("cl_rollspeed", "200", FCVAR_ARCHIVE);
 	cl_bobtilt = CVAR_CREATE("cl_bobtilt", "0", FCVAR_ARCHIVE);
+	r_decals = gEngfuncs.pfnGetCvarPointer("r_decals");
 
 	m_pSpriteList = NULL;
 
@@ -434,6 +436,11 @@ void CHud::Init()
 	m_Menu.Init();
 
 	MsgFunc_ResetHUD(0, 0, NULL);
+
+#ifdef STEAM_RICH_PRESENCE
+	gEngfuncs.pfnClientCmd("richpresence_gamemode\n"); // reset
+	gEngfuncs.pfnClientCmd("richpresence_update\n");
+#endif
 }
 
 // CHud destructor
@@ -720,7 +727,7 @@ bool CHud::MsgFunc_SetFOV(const char* pszName, int iSize, void* pbuf)
 	else
 	{
 		// set a new sensitivity that is proportional to the change from the FOV default
-		m_flMouseSensitivity = sensitivity->value * ((float)newfov / (float)def_fov) * CVAR_GET_FLOAT("zoom_sensitivity_ratio");
+		m_flMouseSensitivity = IN_GetMouseSensitivity() * ((float)newfov / (float)def_fov) * CVAR_GET_FLOAT("zoom_sensitivity_ratio");
 	}
 
 	return true;

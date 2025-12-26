@@ -1298,11 +1298,7 @@ void CHalfLifeCTFplay::ChangePlayerTeam(CBasePlayer* pPlayer, const char* pCharN
 
 				const auto v7 = bGib ? DMG_ALWAYSGIB : DMG_NEVERGIB;
 
-				auto pKiller = INDEXENT(0);
-
-				auto pEntKiller = pKiller ? &pKiller->v : nullptr;
-
-				pPlayer->TakeDamage(pEntKiller, pEntKiller, 900, v7);
+				pPlayer->TakeDamage(CWorld::World->pev, CWorld::World->pev, 900, v7);
 
 				m_DisableDeathMessages = false;
 				m_DisableDeathPenalty = false;
@@ -1761,7 +1757,7 @@ void CHalfLifeCTFplay::SendTeamStatInfo(CTFTeam iTeamNum)
 		}
 	}
 
-	if ((ToTeamIndex(iTeamNum)) < MaxTeams)
+	if (iTeamNum != CTFTeam::None && (ToTeamIndex(iTeamNum)) < MaxTeams)
 	{
 		UTIL_LogPrintf("// === Team %s Statistics ===\n", team_names[ToTeamIndex(iTeamNum)]);
 	}

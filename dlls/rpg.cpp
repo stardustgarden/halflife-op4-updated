@@ -86,10 +86,10 @@ LINK_ENTITY_TO_CLASS(rpg_rocket, CRpgRocket);
 
 CRpgRocket::~CRpgRocket()
 {
-	if (m_pLauncher)
+	if (m_hLauncher)
 	{
 		// my launcher is still around, tell it I'm dead.
-		static_cast<CRpg*>(static_cast<CBaseEntity*>(m_pLauncher))->m_cActiveRockets--;
+		static_cast<CRpg*>(static_cast<CBaseEntity*>(m_hLauncher))->m_cActiveRockets--;
 	}
 }
 
@@ -103,7 +103,7 @@ CRpgRocket* CRpgRocket::CreateRpgRocket(Vector vecOrigin, Vector vecAngles, CBas
 	pRocket->pev->angles = vecAngles;
 	pRocket->Spawn();
 	pRocket->SetTouch(&CRpgRocket::RocketTouch);
-	pRocket->m_pLauncher = pLauncher; // remember what RPG fired me.
+	pRocket->m_hLauncher = pLauncher; // remember what RPG fired me.
 	pLauncher->m_cActiveRockets++;	  // register this missile as active for the launcher
 	pRocket->pev->owner = pOwner->edict();
 
@@ -488,6 +488,12 @@ void CRpg::SecondaryAttack()
 
 void CRpg::WeaponIdle()
 {
+	// Reset when the player lets go of the trigger.
+	if ((m_pPlayer->pev->button & (IN_ATTACK | IN_ATTACK2)) == 0)
+	{
+		ResetEmptySound();
+	}
+
 	UpdateSpot();
 
 	if (m_flTimeWeaponIdle > UTIL_WeaponTimeBase())
@@ -516,7 +522,6 @@ void CRpg::WeaponIdle()
 			m_flTimeWeaponIdle = UTIL_WeaponTimeBase() + 6.1;
 		}
 
-		ResetEmptySound();
 		SendWeaponAnim(iAnim);
 	}
 	else
@@ -531,6 +536,12 @@ void CRpg::UpdateSpot()
 {
 
 #ifndef CLIENT_DLL
+	// Don't turn on the laser if we're in the middle of a reload.
+	if (m_fInReload)
+	{
+		return;
+	}
+
 	if (m_fSpotActive)
 	{
 		if (!m_pSpot)
@@ -549,7 +560,6 @@ void CRpg::UpdateSpot()
 	}
 #endif
 }
-
 
 class CRpgAmmo : public CBasePlayerAmmo
 {

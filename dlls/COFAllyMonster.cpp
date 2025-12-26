@@ -461,7 +461,7 @@ void COFAllyMonster::RunTask(Task_t* pTask)
 	case TASK_TLK_CLIENT_STARE:
 	case TASK_TLK_LOOK_AT_CLIENT:
 
-		edict_t* pPlayer;
+		CBaseEntity* pPlayer;
 
 		// track head to the client for a while.
 		if (m_MonsterState == MONSTERSTATE_IDLE &&
@@ -469,11 +469,11 @@ void COFAllyMonster::RunTask(Task_t* pTask)
 			!IsTalking())
 		{
 			// Get edict for one player
-			pPlayer = g_engfuncs.pfnPEntityOfEntIndex(1);
+			pPlayer = UTIL_GetLocalPlayer();
 
 			if (pPlayer)
 			{
-				IdleHeadTurn(pPlayer->v.origin);
+				IdleHeadTurn(pPlayer->pev->origin);
 			}
 		}
 		else
@@ -486,14 +486,14 @@ void COFAllyMonster::RunTask(Task_t* pTask)
 		if (pTask->iTask == TASK_TLK_CLIENT_STARE)
 		{
 			// fail out if the player looks away or moves away.
-			if ((pPlayer->v.origin - pev->origin).Length2D() > TLK_STARE_DIST)
+			if ((pPlayer->pev->origin - pev->origin).Length2D() > TLK_STARE_DIST)
 			{
 				// player moved away.
 				TaskFail();
 			}
 
-			UTIL_MakeVectors(pPlayer->v.angles);
-			if (UTIL_DotPoints(pPlayer->v.origin, pev->origin, gpGlobals->v_forward) < m_flFieldOfView)
+			UTIL_MakeVectors(pPlayer->pev->angles);
+			if (UTIL_DotPoints(pPlayer->pev->origin, pev->origin, gpGlobals->v_forward) < m_flFieldOfView)
 			{
 				// player looked away
 				TaskFail();
@@ -509,13 +509,13 @@ void COFAllyMonster::RunTask(Task_t* pTask)
 	case TASK_FACE_PLAYER:
 	{
 		// Get edict for one player
-		edict_t* pPlayer = g_engfuncs.pfnPEntityOfEntIndex(1);
+		CBaseEntity* pPlayer = UTIL_GetLocalPlayer();
 
 		if (pPlayer)
 		{
-			MakeIdealYaw(pPlayer->v.origin);
+			MakeIdealYaw(pPlayer->pev->origin);
 			ChangeYaw(pev->yaw_speed);
-			IdleHeadTurn(pPlayer->v.origin);
+			IdleHeadTurn(pPlayer->pev->origin);
 			if (gpGlobals->time > m_flWaitFinished && FlYawDiff() < 10)
 			{
 				TaskComplete();
@@ -1111,11 +1111,8 @@ void COFAllyMonster::PlayScriptedSentence(const char* pszSentence, float duratio
 	m_hTalkTarget = pListener;
 }
 
-void COFAllyMonster::PlaySentence(const char* pszSentence, float duration, float volume, float attenuation)
+void COFAllyMonster::PlaySentenceCore(const char* pszSentence, float duration, float volume, float attenuation)
 {
-	if (!pszSentence)
-		return;
-
 	Talk(duration);
 
 	COFAllyMonster::g_talkWaitTime = gpGlobals->time + duration + 2.0;
@@ -1163,7 +1160,7 @@ bool COFAllyMonster::TakeDamage(entvars_t* pevInflictor, entvars_t* pevAttacker,
 		{
 			CBaseEntity* pFriend = FindNearestFriend(false);
 
-			if (pFriend && pFriend->IsAlive())
+			if (pFriend && pFriend->IsAlive() && pFriend->pev->deadflag == DEAD_NO)
 			{
 				// only if not dead or dying!
 				COFAllyMonster* pTalkMonster = (COFAllyMonster*)pFriend;
@@ -1232,14 +1229,14 @@ Schedule_t* COFAllyMonster::GetScheduleOfType(int Type)
 
 		if (!IsTalking() && HasConditions(bits_COND_SEE_CLIENT) && RANDOM_LONG(0, 6) == 0)
 		{
-			edict_t* pPlayer = g_engfuncs.pfnPEntityOfEntIndex(1);
+			CBaseEntity* pPlayer = UTIL_GetLocalPlayer();
 
 			if (pPlayer)
 			{
 				// watch the client.
-				UTIL_MakeVectors(pPlayer->v.angles);
-				if ((pPlayer->v.origin - pev->origin).Length2D() < TLK_STARE_DIST &&
-					UTIL_DotPoints(pPlayer->v.origin, pev->origin, gpGlobals->v_forward) >= m_flFieldOfView)
+				UTIL_MakeVectors(pPlayer->pev->angles);
+				if ((pPlayer->pev->origin - pev->origin).Length2D() < TLK_STARE_DIST &&
+					UTIL_DotPoints(pPlayer->pev->origin, pev->origin, gpGlobals->v_forward) >= m_flFieldOfView)
 				{
 					// go into the special STARE schedule if the player is close, and looking at me too.
 					return &slOFAllyTlkIdleWatchClient[1];
@@ -1366,7 +1363,10 @@ bool COFAllyMonster::CanFollow()
 {
 	if (m_MonsterState == MONSTERSTATE_SCRIPT)
 	{
-		if (!m_pCine->CanInterrupt())
+		// It's possible for m_MonsterState to still be MONSTERSTATE_SCRIPT when the script has already ended.
+		// We'll treat a null pointer as an uninterruptable script and wait for the NPC to change states
+		// before allowing players to make them follow them again.
+		if (!m_pCine || !m_pCine->CanInterrupt())
 			return false;
 	}
 
